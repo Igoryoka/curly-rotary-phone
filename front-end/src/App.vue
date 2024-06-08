@@ -62,6 +62,7 @@ export default {
     return {
       file: null,
       emotions: [],
+      audio_duration: [],
       errorMessage: '',
       successMessage: '',
       loading: false,
@@ -148,6 +149,7 @@ export default {
           }
         });
         this.emotions = response.data.emotions;
+        this.audio_duration = response.data.audio_duration;
         this.plotEmotions();
         this.successMessage = 'File uploaded successfully!';
         this.showSuccess = true;
@@ -168,8 +170,8 @@ export default {
       const defaultTimePoints = defaultEmotions.map((_, index) => index * 5);
 
       const emotionsList = ['neutral', 'calm', 'happy', 'sad', 'angry', 'fearful', 'disgust', 'surprised'];
-      const emotionToNumber = emotionsList.reduce((acc, emotion, index) => {
-        acc[emotion] = index;
+      const emotionToNumber = emotionsList.reduce((acc, emotion) => {
+        acc[emotion] = 0;
         return acc;
       }, {});
       const numericSequence = defaultEmotions.map(emotion => emotionToNumber[emotion]);
@@ -222,6 +224,14 @@ export default {
         }
       });
     },
+    divideIntoFiveParts(number) {
+      let parts = [];
+      let increment = number / 5;
+      for (let i = 1; i <= 5; i++) {
+          parts.push(Math.trunc(i * increment));
+      }
+      return parts;
+    },
     plotEmotions() {
       this.clearChart();
 
@@ -231,7 +241,9 @@ export default {
         return acc;
       }, {});
       const numericSequence = this.emotions.map(emotion => emotionToNumber[emotion]);
-      const timePoints = numericSequence.map((_, index) => index * 5);
+
+      // const timePoints = numericSequence.map((_, index) => index * 5);
+      const timePoints = this.divideIntoFiveParts(this.audio_duration);
 
       const ctx = this.$refs.canvas.getContext('2d');
       this.chart = new Chart(ctx, {

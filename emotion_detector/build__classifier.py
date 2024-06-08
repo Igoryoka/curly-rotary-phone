@@ -14,138 +14,129 @@ import joblib.externals
 
 from sklearn.metrics import accuracy_score 
 
-
-
 #?-------------------Feature Extraction------------------------------------------
-# Функція для екстракції аудіо-характеристик за допомогою бібліотеки librosa.
+# Функція для вилучення ознак з аудіофайлу
 def extract_feature(file_name):
-
     X, sample_rate = librosa.load(file_name)
     stft = np.abs(librosa.stft(X))
     mfccs = np.mean(librosa.feature.mfcc(y=X, sr=sample_rate, n_mfcc=40).T,axis=0)
     chroma = np.mean(librosa.feature.chroma_stft(S=stft, sr=sample_rate).T,axis=0)
     mel = np.mean(librosa.feature.melspectrogram(X, sr=sample_rate).T,axis=0)
     contrast = np.mean(librosa.feature.spectral_contrast(S=stft, sr=sample_rate).T,axis=0)
-    tonnetz = np.mean(librosa.feature.tonnetz(y=librosa.effects.harmonic(X),
-    sr=sample_rate).T,axis=0)
+    tonnetz = np.mean(librosa.feature.tonnetz(y=librosa.effects.harmonic(X), sr=sample_rate).T,axis=0)
     return mfccs,chroma,mel,contrast,tonnetz
 #?-----------------------------------------------------------------------------------
 
-# Функція для аналізу аудіофайлів у заданих директоріях та екстракції характеристик.
+# Функція для парсингу аудіофайлів та вилучення ознак і міток
 def parse_audio_files(parent_dir,sub_dirs,file_ext="*.wav"):
-
     features, labels = np.empty((0,193)), np.empty(0)
     for label, sub_dir in enumerate(sub_dirs):
         for fn in glob.glob(os.path.join(parent_dir, sub_dir, file_ext)):
             print(fn)
             try:
-              mfccs, chroma, mel, contrast,tonnetz = extract_feature(fn)
+                mfccs, chroma, mel, contrast, tonnetz = extract_feature(fn)
             except Exception as e:
-              print ("Error encountered while parsing file: ", fn)
-              continue
-            ext_features = np.hstack([mfccs,chroma,mel,contrast,tonnetz])
-            features = np.vstack([features,ext_features])
+                print("Error encountered while parsing file: ", fn)
+                continue
+            ext_features = np.hstack([mfccs, chroma, mel, contrast, tonnetz])
+            features = np.vstack([features, ext_features])
             print(fn.split('\\')[-1].split('-')[2])
-            # Збереження мітки класу, яка інтерпретується з імені файлу.
             labels = np.append(labels, fn.split('\\')[-1].split('-')[2])
-    return np.array(features), np.array(labels, dtype = np.int)
+    return np.array(features), np.array(labels, dtype=np.int64)
 
-# Функція для кодування міток в формат "один з N".
+# Функція для one-hot кодування міток
 def one_hot_encode(labels):
     n_labels = len(labels)
     n_unique_labels = len(np.unique(labels))
-    one_hot_encode = np.zeros((n_labels,n_unique_labels+1))
+    one_hot_encode = np.zeros((n_labels, n_unique_labels + 1))
     one_hot_encode[np.arange(n_labels), labels] = 1
-    # Видалення зайвої колонки для уникнення загальмованості моделі.
-    one_hot_encode=np.delete(one_hot_encode, 0, axis=1)
+    one_hot_encode = np.delete(one_hot_encode, 0, axis=1)
     return one_hot_encode
 
-# Визначення головної директорії і піддиректорій для обробки.
-main_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..\\audio_files'))
+# Основна директорія з аудіофайлами
+main_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..\\Audio_Speech_Actors_01-24'))
+sub_dir = os.listdir(main_dir)
 
+print("\ncollecting features and labels...")
+print("\nthis will take some time...")
 
-sub_dir=os.listdir(main_dir)
-
-print ("\ncollecting features and labels...")
-print("\nit will take some time...")
-
-features, labels = parse_audio_files(main_dir,sub_dir)
+# Парсинг аудіофайлів та вилучення ознак і міток
+features, labels = parse_audio_files(main_dir, sub_dir)
 
 print("Features extracted.....")
 
-
-#one hot encoding features
-np.save('X',features)
+# Збереження вилучених ознак у файл
+np.save('X', features)
 print('Saved x.npy.....')
 
-#one hot encoding labels
+# Збереження міток у файл після one-hot кодування
 labels = one_hot_encode(labels)
 np.save('y', labels)
 print('Saved y.npy.....')
 
-X=np.load('X.npy')
-y=np.load('y.npy')
+# Завантаження збережених даних
+X = np.load('X.npy')
+y = np.load('y.npy')
 
-
-# Поділ даних на навчальний та тестовий набори.
+# Розділення даних на тренувальний та тестовий набори
 train_x, test_x, train_y, test_y = train_test_split(X, y, test_size=0.33, random_state=42)
 y_train = np.argmax(train_y, axis=1)
 y_test = np.argmax(test_y, axis=1)
-x_train =train_x
+x_train = train_x
 
-# Навчання класифікатора SVM.
-clf = svm.SVC(gamma= 'auto')
-clf.fit(x_train,y_train)
-# n_dim = train_x.shape[1]
-# n_classes = train_y.shape[1]
-# n_hidden_units_1 = n_dim
-# n_hidden_units_2 = 400 # approx n_dim * 2
-# n_hidden_units_3 = 200 # half of layer 2
-# n_hidden_units_4 = 100
+# Створення та тренування моделі SVM
+clf = svm.SVC(gamma='auto')
+clf.fit(x_train, y_train)
 
-# def create_model():
-# Збереження навченої моделі.
+# Збереження моделі у файл
 model_name = 'SVM_emotion_clf_24.pkl'
-joblib.dump(clf,model_name)
+joblib.dump(clf, model_name)
 print("Model saved as " + model_name)
 
-# Оцінка точності на тестовому наборі.
+# Передбачення на тестових даних
 predictions = clf.predict(test_x)
 
-# print(accuracy_score(y_test,predictions))
+# Виведення точності моделі на тестовому наборі
+print(accuracy_score(y_test, predictions))
 
-
-# #create the model
-# model = create_model()
-# joblib.dump(model,'model_speech_emotion_detector')
-# print('Model saved,\n Aytala macha')
-# #train the model
-
-
-# #predicting from the model
-# predict=model.predict(test_x)
-
-# emotions=['neutral', 'calm', 'happy', 'sad', 'angry', 'fearful', 'disgust', 'surprised']
-# #predicted emotions from the test set
+# Код для створення та відображення матриці плутанини (раскоментуйте, якщо потрібно)
+# emotions = ['neutral', 'calm', 'happy', 'sad', 'angry', 'fearful', 'disgust', 'surprised']
 # y_pred = np.argmax(predict, 1)
-# predicted_emo=[]
-# for i in range(0,test_y.shape[0]):
-#   emo=emotions[y_pred[i]]
-#   predicted_emo.append(emo)
-
-# actual_emo=[]
-# y_true=np.argmax(test_y, 1)
-# for i in range(0,test_y.shape[0]):
-#   emo=emotions[y_true[i]]
-#   actual_emo.append(emo)
-
-#! #generate the confusion matrix
-# cm =confusion_matrix(actual_emo, predicted_emo)
+# predicted_emo = [emotions[i] for i in y_pred]
+# actual_emo = [emotions[i] for i in np.argmax(test_y, 1)]
+# cm = confusion_matrix(actual_emo, predicted_emo)
 # index = ['angry', 'calm', 'disgust', 'fearful', 'happy', 'neutral', 'sad', 'surprised']
 # columns = ['angry', 'calm', 'disgust', 'fearful', 'happy', 'neutral', 'sad', 'surprised']
-# cm_df = pd.DataFrame(cm,index,columns)
+# cm_df = pd.DataFrame(cm, index, columns)
 # plt.figure(figsize=(10,6))
-
 # sns.heatmap(cm_df, annot=True)
 # print(cm_df)
 # plt.show()
+
+# Новий код, доданий для завантаження та оцінки моделі
+CUR_DIR = os.getcwd()
+model_name = 'SVM_emotion_clf_24.pkl'
+features = 'Features_emotions_24.npy'
+labels = 'labels_emotions_24.npy'
+
+def load_model():
+    return joblib.load(os.path.join(CUR_DIR, model_name))
+
+def fPrediction(clf, train_x, test_x, train_y, test_y):
+    prediction = clf.predict(train_x)
+    print("Accuracy score of EMOTION DETECTOR is : " + str(accuracy_score(train_y, prediction)))
+
+def print_shape(*args):
+    for each in args:
+        print("Shape " + str(each.shape))
+
+if __name__ == '__main__':
+    x = np.load(features)
+    y = np.load(labels)
+    train_x, test_x, train_y, test_y = train_test_split(x, y, test_size=0.9, random_state=42)
+
+    train_y = np.argmax(train_y, axis=1)
+    test_y = np.argmax(test_y, axis=1)
+
+    clf = load_model()
+    fPrediction(clf, train_x, test_x, train_y, test_y)

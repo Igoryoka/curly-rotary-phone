@@ -28,18 +28,14 @@ def allowed_file(filename):
 
 # Функція для конвертації відео в аудіо
 def convert_video_to_audio(video_path, audio_path):
-    clip = mp.VideoFileClip(video_path)
-    clip.audio.write_audiofile(audio_path)
+    with mp.VideoFileClip(video_path) as clip:
+        clip.audio.write_audiofile(audio_path, verbose=False, logger=None)
+    clip.close()
 
 # Функція для подавлення шуму
 def denoise_audio(y, sr):
     y_denoised = librosa.effects.preemphasis(y)
     return y_denoised
-
-# Функція для поділу аудіо на сегменти
-def split_audio(y, sr, segment_duration=3):
-    segment_length = int(segment_duration * sr)
-    return [y[i:i + segment_length] for i in range(0, len(y), segment_length)]
 
 @app.route('/upload', methods=['POST'])
 def upload_file():
@@ -60,14 +56,15 @@ def upload_file():
 
         # Збереження файлу у тимчасову директорію
         file_extension = file.filename.rsplit('.', 1)[1].lower()
-        temp_dir = tempfile.gettempdir()
+        # temp_dir = tempfile.gettempdir()
         temp_filename = f"temp_{uuid.uuid4()}.{file_extension}"
-        file_path = os.path.join(temp_dir, temp_filename)
+        # file_path = os.path.join(temp_dir, temp_filename)
+        file_path = temp_filename
         file.save(file_path)
 
         # Конвертація відео в аудіо, якщо файл є відео
         if file_extension in ['mp4', 'avi', 'mov']:
-            audio_path = os.path.join(temp_dir, f"audio_{uuid.uuid4()}.wav")
+            audio_path = f"audio_{uuid.uuid4()}.wav"
             convert_video_to_audio(file_path, audio_path)
             os.remove(file_path)
         else:
@@ -75,10 +72,16 @@ def upload_file():
 
         # Завантаження аудіофайлу
         y, sr = librosa.load(audio_path, sr=None)
-        # Подача шуму
+        audio_duration = librosa.get_duration(y=y, sr=sr)
+
+        # Опрацювання шуму
         y_denoised = denoise_audio(y, sr)
-        # Поділ аудіо на сегменти
-        segments = split_audio(y_denoised, sr, segment_duration=3)
+
+        # Розділення аудіо на 5 частин
+        segment_length = len(y_denoised) // 5
+
+        segments = [y_denoised[i * segment_length:(i + 1) * segment_length] for i in range(5)]
+
 
         # Отримання абсолютного шляху до файлу моделі
         model_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'emotion_detector', 'SVM_emotion_clf_24.pkl'))
@@ -87,28 +90,29 @@ def upload_file():
         if not os.path.exists(model_path):
             return jsonify({'error': f'Model file not found at {model_path}'}), 500
 
-        segment_emotions = []
+        data, samplerate = sf.read(audio_path)
+        segment_length = len(data) // 5
+
+        emotions_over_time = []
+
         # Аналіз кожного сегменту
-        for segment in segments:
+        for i, segment in enumerate(segments):
             if len(segment) == 0:
                 continue
-            segment_temp_path = os.path.join(temp_dir, f"segment_{uuid.uuid4()}.wav")
-            sf.write(segment_temp_path, segment, sr)
 
-            # Виділення ознак та передбачення емоції
-            mfccs, chroma, mel, contrast, tonnetz = extract_feature(segment_temp_path)
+            segment = data[i * segment_length:(i + 1) * segment_length]
+            sf.write(f'temp_segment_{i}.wav', segment, samplerate)
+            mfccs, chroma, mel, contrast, tonnetz = extract_feature(f'temp_segment_{i}.wav')
             ext_features = np.hstack([mfccs, chroma, mel, contrast, tonnetz])
-            features = np.vstack([ext_features])
-            prediction = predict_emotion(model_path, features)
-            emotion = emotions[prediction[0]]
-            segment_emotions.append(emotion)
+            prediction = predict_emotion(model_path, ext_features.reshape(1, -1))
+            emotions_over_time.append(emotions[prediction[0]])
 
-            os.remove(segment_temp_path)
+            os.remove(f'temp_segment_{i}.wav')
 
         os.remove(audio_path)
 
         # Повернення передбачених емоцій
-        return jsonify({'emotions': segment_emotions}), 200
+        return jsonify({'emotions': emotions_over_time, 'audio_duration': audio_duration}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
